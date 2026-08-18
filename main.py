@@ -26,6 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def fix_vercel_path(request: Request, call_next):
+    matched_path = request.headers.get("x-matched-path")
+    if matched_path and matched_path != request.scope.get("path"):
+        clean_path = matched_path.split("?")[0]
+        request.scope["path"] = clean_path
+    return await call_next(request)
+
 class SingleScanRequest(BaseModel):
     url: str
     timeout: Optional[float] = 4.0
