@@ -110,7 +110,7 @@ def parse_target(target: str) -> Tuple[str, int]:
     return host, port
 
 def build_client_hello(host: str) -> bytes:
-    """Craft TLS 1.3 ClientHello with PQC groups and key shares."""
+    """Craft TLS 1.3 ClientHello with PQC groups, ALPN, PSK modes, and dual key shares."""
     client_random = os.urandom(32)
     session_id = os.urandom(32)
     
@@ -140,25 +140,40 @@ def build_client_hello(host: str) -> bytes:
     groups_data = struct.pack("!H", len(groups_body)) + groups_body
     ext_sup_groups = struct.pack("!HH", 0x000a, len(groups_data)) + groups_data
     
-    # 4. Signature Algorithms - 0x000d
-    sig_algos = [0x0403, 0x0804, 0x0401, 0x0501, 0x0601, 0x0805, 0x0806]
+    # 4. ALPN (0x0010) -> h2, http/1.1 (Required by modern WAFs/Cloudflare)
+    alpn_list = b'\x02h2\x08http/1.1'
+    alpn_data = struct.pack("!H", len(alpn_list)) + alpn_list
+    ext_alpn = struct.pack("!HH", 0x0010, len(alpn_data)) + alpn_data
+
+    # 5. PSK Key Exchange Modes (0x002d) -> psk_dhe_ke (1)
+    psk_modes = struct.pack("!BB", 1, 1)
+    ext_psk_modes = struct.pack("!HH", 0x002d, len(psk_modes)) + psk_modes
+
+    # 6. EC Point Formats (0x000b) -> uncompressed (0)
+    ec_formats = struct.pack("!BB", 1, 0)
+    ext_ec_formats = struct.pack("!HH", 0x000b, len(ec_formats)) + ec_formats
+
+    # 7. Signature Algorithms - 0x000d (RSA-PSS, ECDSA, RSA-PKCS1)
+    sig_algos = [0x0804, 0x0403, 0x0805, 0x0503, 0x0806, 0x0603, 0x0401, 0x0501, 0x0601]
     sig_body = b''.join(struct.pack("!H", s) for s in sig_algos)
     sig_data = struct.pack("!H", len(sig_body)) + sig_body
     ext_sig = struct.pack("!HH", 0x000d, len(sig_data)) + sig_data
     
-    # 5. Key Share - 0x0033
-    # Standard valid X25519 public key (Basepoint)
+    # 8. Key Share - 0x0033 (Dual: x25519 + secp256r1)
     x25519_pk = b'\x09' + b'\x00' * 31
     ks_001d = struct.pack("!HH", 0x001d, 32) + x25519_pk
-    ks_data = struct.pack("!H", len(ks_001d)) + ks_001d
+    p256_pk = bytes.fromhex("046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
+    ks_0017 = struct.pack("!HH", 0x0017, 65) + p256_pk
+    ks_data_body = ks_001d + ks_0017
+    ks_data = struct.pack("!H", len(ks_data_body)) + ks_data_body
     ext_ks = struct.pack("!HH", 0x0033, len(ks_data)) + ks_data
     
-    # Combine extensions
-    all_extensions = ext_sni + ext_sup_versions + ext_sup_groups + ext_sig + ext_ks
+    # Combine all extensions
+    all_extensions = ext_sni + ext_sup_versions + ext_sup_groups + ext_psk_modes + ext_ec_formats + ext_sig + ext_alpn + ext_ks
     ext_total = struct.pack("!H", len(all_extensions)) + all_extensions
     
-    # Cipher suites
-    ciphers = [0x1301, 0x1302, 0x1303, 0xc02f, 0xc02b, 0xcca8]
+    # Cipher suites (TLS 1.3 AES-GCM & ChaCha, TLS 1.2 ECDHE)
+    ciphers = [0x1301, 0x1302, 0x1303, 0xc02f, 0xc030, 0xc02b, 0xc02c, 0xcca8, 0xcca9]
     cipher_bytes = struct.pack("!H", len(ciphers) * 2) + b''.join(struct.pack("!H", c) for c in ciphers)
     
     # Compression (0 = null)
@@ -401,11 +416,38 @@ def scan_pqc(target_url: str, timeout: float = 4.0) -> Dict[str, Any]:
                 result["tls_info"]["cipher_suite"] = cert_info.get("tls_cipher", "Unknown")
                 
         # 3. Evaluate Compliance & Grading
+        # Normalize TLS version (e.g. 'TLSv1.3' -> 'TLS 1.3')
+        raw_tls_ver = result["tls_info"]["version"]
+        if raw_tls_ver:
+            tls_ver = raw_tls_ver.replace("TLSv", "TLS ").replace("TLS 1.3", "TLS 1.3").replace("TLS 1.2", "TLS 1.2").strip()
+            if "1.3" in raw_tls_ver:
+                tls_ver = "TLS 1.3"
+            elif "1.2" in raw_tls_ver:
+                tls_ver = "TLS 1.2"
+            elif "1.1" in raw_tls_ver:
+                tls_ver = "TLS 1.1"
+            elif "1.0" in raw_tls_ver or raw_tls_ver == "TLSv1":
+                tls_ver = "TLS 1.0"
+        else:
+            tls_ver = "Unknown"
+        result["tls_info"]["version"] = tls_ver
+
         is_pqc_kex = result["key_exchange"]["is_pqc"]
         is_pqc_cert = result["certificate"]["is_pqc"]
-        tls_ver = result["tls_info"]["version"]
         grp_name = result["key_exchange"]["group_name"]
         
+        # If group name was not captured from raw probe but TLS 1.3 was established
+        if grp_name == "None" and tls_ver == "TLS 1.3":
+            grp_name = "Classical ECDH (X25519/P-256)"
+            result["key_exchange"]["group_name"] = grp_name
+            result["key_exchange"]["group_type"] = "Classical ECDH"
+            result["key_exchange"]["details"] = "Standard Classical TLS 1.3 Key Exchange (Non-PQC)"
+        elif grp_name == "None" and tls_ver == "TLS 1.2":
+            grp_name = "Classical ECDHE / DHE"
+            result["key_exchange"]["group_name"] = grp_name
+            result["key_exchange"]["group_type"] = "Classical ECDHE"
+            result["key_exchange"]["details"] = "Standard TLS 1.2 Key Exchange"
+
         if is_pqc_kex and is_pqc_cert:
             result["passed"] = True
             result["grade"] = "A++"
@@ -463,13 +505,22 @@ def scan_pqc(target_url: str, timeout: float = 4.0) -> Dict[str, Any]:
                 f"Not PQC ready: Operates on TLS 1.2 which lacks modern PQC KeyShare mechanisms. "
                 f"Upgrade to TLS 1.3 and enable PQC Hybrid KEM."
             )
-        else:
+        elif tls_ver in ("TLS 1.1", "TLS 1.0"):
             result["passed"] = False
             result["grade"] = "D"
             result["status_badge"] = "insecure"
-            result["status_title"] = "ไม่ผ่าน (โปรโตคอลเก่าหรือไม่ปลอดภัย)"
+            result["status_title"] = "ไม่ผ่าน (โปรโตคอลล้าสมัย)"
             result["status_title_en"] = "FAILED (Outdated Protocol)"
-            result["reason_th"] = f"ไม่ผ่าน: เวอร์ชัน TLS ({tls_ver}) หรือการเข้ารหัสล้าสมัย มีความเสี่ยงด้านความปลอดภัย"
+            result["reason_th"] = f"ไม่ผ่าน: เวอร์ชัน TLS ({tls_ver}) ล้าสมัยและถูกยกเลิกการใช้งานแล้ว มีความเสี่ยงด้านความปลอดภัย"
+            result["reason_en"] = f"Failed: TLS version ({tls_ver}) is deprecated and insecure."
+        else:
+            result["passed"] = False
+            result["grade"] = "E"
+            result["status_badge"] = "error"
+            result["status_title"] = "ไม่สามารถเชื่อมต่อ TLS ได้"
+            result["status_title_en"] = "TLS Connection Failed"
+            result["reason_th"] = f"ไม่สามารถตรวจสอบ TLS handshake ของเซิร์ฟเวอร์ได้"
+            result["reason_en"] = f"Unable to establish TLS handshake with server."
             result["reason_en"] = f"Failed: TLS version ({tls_ver}) or cipher is obsolete and insecure."
 
     except Exception as e:

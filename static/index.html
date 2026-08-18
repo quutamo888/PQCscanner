@@ -7,7 +7,7 @@
   <meta name="description" content="ระบบตรวจสอบความพร้อม Post-Quantum Cryptography (PQC) รองรับ NIST ML-KEM / Kyber / TLS 1.3 สำหรับเว็บไซต์ ด้วยการสแกนแบบ Batch URL">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -37,9 +37,7 @@
   <!-- Hero Section -->
   <section class="hero-section">
     <div class="page-container">
-      <p class="hero-eyebrow">Post-Quantum Cryptography</p>
       <h1 class="hero-headline">PQC Compliance Scanner</h1>
-      <p class="hero-tagline">ตรวจสอบว่าเว็บไซต์ของคุณรองรับ Hybrid KEM (ML-KEM / Kyber) แล้วหรือยัง พร้อมอธิบายเหตุผล</p>
     </div>
   </section>
 
@@ -89,7 +87,7 @@
           <div id="digInputContainer" style="display:none;">
             <div class="dig-input-group">
               <div class="dig-input-row">
-                <input type="text" id="digDomainInput" placeholder="ระบุ Root Domain เช่น dga.or.th, cloudflare.com, google.com" class="dig-text-input">
+                <input type="text" id="digDomainInput" placeholder="ระบุ Root Domain เช่น dga.or.th, cloudflare.com, google.com" class="dig-text-input" onkeydown="if(event.key==='Enter') startDigDomain()">
                 <button class="btn btn-primary" id="btnStartDig" onclick="startDigDomain()">
                   <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                   ค้นหา Subdomains

@@ -1,3 +1,4 @@
+import os
 import asyncio
 import json
 from typing import List, Optional
@@ -159,11 +160,12 @@ async def scan_batch_stream(req: BatchScanRequest):
     )
 
 # Mount static folder
-app.mount("/static", StaticFiles(directory="static"), name="static")
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", response_class=FileResponse)
 async def serve_index():
-    return FileResponse("static/index.html")
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn

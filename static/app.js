@@ -126,12 +126,26 @@ async function startDigDomain() {
 
     const btn = document.getElementById('btnStartDig');
     const resultsBox = document.getElementById('digResultsBox');
-    const foundCount = document.getElementById('digFoundCount');
-    const targetText = document.getElementById('digDomainTarget');
-    const listEl = document.getElementById('digSubdomainList');
+    const presetChips = document.querySelectorAll('#digInputContainer .preset-chip');
 
+    // Set loading state
     btn.disabled = true;
-    btn.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite;">⏳</span> กำลังค้นหา...`;
+    input.disabled = true;
+    presetChips.forEach(chip => chip.style.pointerEvents = 'none');
+    btn.innerHTML = `<span class="dig-loading-spinner" style="width:13px;height:13px;border-width:2px;border-color:rgba(255,255,255,0.3);border-top-color:#fff;display:inline-block;vertical-align:middle;margin-right:6px;"></span> กำลังสแกนหา...`;
+
+    // Show immediate animated loading box
+    resultsBox.style.display = 'block';
+    resultsBox.innerHTML = `
+      <div class="dig-loading-state">
+        <div class="dig-loading-spinner"></div>
+        <div class="dig-loading-info">
+          <h4>กำลังสแกนค้นหา Subdomains สำหรับ <span style="color:var(--color-accent-blue-soft);font-family:var(--font-mono);">${domain}</span></h4>
+          <p>กำลังค้นหาจาก Certificate Transparency Logs (crt.sh), HackerTarget, RapidDNS และตรวจสอบ DNS Records ที่ตอบสนองจริง...</p>
+          <div class="dig-pulse-bar"><div class="dig-pulse-bar-inner"></div></div>
+        </div>
+      </div>
+    `;
 
     try {
         const resp = await fetch('/api/discover-subdomains', {
@@ -147,23 +161,38 @@ async function startDigDomain() {
         const data = await resp.json();
         currentDiscoveredSubdomains = data.subdomains || [];
 
-        resultsBox.style.display = 'block';
-        foundCount.textContent = `พบ ${currentDiscoveredSubdomains.length} Subdomains`;
-        targetText.textContent = `(${data.domain}) พร้อมใช้งานจริง`;
-
-        if (currentDiscoveredSubdomains.length === 0) {
-            listEl.innerHTML = `<span style="color:var(--color-ink-muted-48);font-size:13px;padding:8px;">ไม่พบ Subdomain สำหรับโดเมนนี้</span>`;
-        } else {
-            listEl.innerHTML = currentDiscoveredSubdomains.map(url => {
-                const clean = url.replace(/^https?:\/\//, '');
-                return `<span class="dig-subdomain-tag">${clean}</span>`;
-            }).join('');
-        }
+        resultsBox.innerHTML = `
+          <div class="dig-results-header">
+            <div>
+              <strong id="digFoundCount">พบ ${currentDiscoveredSubdomains.length} Subdomains</strong>
+              <span id="digDomainTarget" style="color:var(--color-ink-secondary);font-size:13px;margin-left:8px;">(${data.domain}) พร้อมใช้งานจริง</span>
+            </div>
+            <div class="dig-actions-group">
+              <button class="btn btn-secondary" onclick="importDigResultsToInput()">นำเข้าสู่ช่องสแกน</button>
+              <button class="btn btn-primary" onclick="scanDigResultsImmediately()">⚡ เริ่มสแกน PQC ทันที</button>
+            </div>
+          </div>
+          <div class="dig-list-scroll" id="digSubdomainList">
+            ${currentDiscoveredSubdomains.length === 0 
+              ? '<span style="color:var(--color-ink-secondary);font-size:13px;padding:8px;">ไม่พบ Subdomain สำหรับโดเมนนี้</span>' 
+              : currentDiscoveredSubdomains.map(url => {
+                  const clean = url.replace(/^https?:\/\//, '');
+                  return `<span class="dig-subdomain-tag">${clean}</span>`;
+                }).join('')
+            }
+          </div>
+        `;
     } catch (err) {
         console.error('Dig domain failed:', err);
-        alert(`เกิดข้อผิดพลาดในการค้นหา Subdomains: ${err.message}`);
+        resultsBox.innerHTML = `
+          <div style="color:var(--color-fail);padding:14px;background:var(--color-navy-darker);border-radius:var(--radius-md);border:1px solid rgba(235,22,0,0.3);">
+            ⚠️ เกิดข้อผิดพลาดในการค้นหา Subdomains: ${err.message}
+          </div>
+        `;
     } finally {
         btn.disabled = false;
+        input.disabled = false;
+        presetChips.forEach(chip => chip.style.pointerEvents = 'auto');
         btn.innerHTML = `<svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 14z"/></svg> ค้นหา Subdomains`;
     }
 }
@@ -410,16 +439,19 @@ function matchesFilter(item) {
 
 function getBadgeHtml(item) {
     if (item.grade === 'A++') {
-        return `<span class="badge badge-pqc-full">Quantum Proof</span>`;
+        return `<span class="badge badge-pqc-full"><img src="/static/pqc-logo.svg" alt="PQC" class="badge-pqc-icon">Quantum Proof</span>`;
     }
     if (item.grade === 'A+' || item.passed) {
-        return `<span class="badge badge-pqc-ready">PQC Ready</span>`;
+        return `<span class="badge badge-pqc-ready"><img src="/static/pqc-logo.svg" alt="PQC" class="badge-pqc-icon">PQC Ready</span>`;
     }
     if (item.grade === 'B') {
         return `<span class="badge badge-classical">Classical TLS 1.3</span>`;
     }
     if (item.grade === 'C') {
         return `<span class="badge badge-classical-legacy">Legacy TLS 1.2</span>`;
+    }
+    if (item.grade === 'D') {
+        return `<span class="badge badge-error">Insecure TLS</span>`;
     }
     return `<span class="badge badge-error">Error</span>`;
 }
@@ -750,7 +782,7 @@ function renderCbomRows() {
     }).map(r => {
         const pqc = r.key_exchange?.is_pqc;
         const risk = r.grade === 'E' || r.grade === 'F' ? 'ตรวจไม่ได้' : pqc ? 'ต่ำ' : 'สูง';
-        return `<tr><td><strong>${r.host || r.url}</strong><small>${r.url}</small></td><td>${r.key_exchange?.group_name || 'ไม่พบ KEX'}<small>${r.tls_info?.version || 'TLS N/A'}</small></td><td><span class="cbom-risk cbom-risk--${risk === 'สูง' ? 'high' : risk === 'ต่ำ' ? 'low' : 'unknown'}">${risk}</span></td><td><span class="cbom-status ${pqc ? 'cbom-status--ready' : ''}">${pqc ? 'PQC Ready' : 'Classical'}</span></td><td>${pqc ? 'ติดตามมาตรฐานต่อ' : 'วางแผนเปลี่ยนเป็น PQC'}</td></tr>`;
+        return `<tr><td><strong>${r.host || r.url}</strong><small>${r.url}</small></td><td>${r.key_exchange?.group_name || 'ไม่พบ KEX'}<small>${r.tls_info?.version || 'TLS N/A'}</small></td><td><span class="cbom-risk cbom-risk--${risk === 'สูง' ? 'high' : risk === 'ต่ำ' ? 'low' : 'unknown'}">${risk}</span></td><td><span class="cbom-status ${pqc ? 'cbom-status--ready' : ''}">${pqc ? '<img src="/static/pqc-logo.svg" alt="PQC" class="badge-pqc-icon" style="width:13px;height:13px;margin-right:4px;">PQC Ready' : 'Classical'}</span></td><td>${pqc ? 'ติดตามมาตรฐานต่อ' : 'วางแผนเปลี่ยนเป็น PQC'}</td></tr>`;
     }).join('') || '<tr><td colspan="5" class="cbom-empty">ไม่พบรายการ</td></tr>';
 }
 function filterCbomRows() { renderCbomRows(); }
@@ -771,3 +803,7 @@ window.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
     if (e.target === cbomModal) closeCbomModal();
 });
+
+// Initialize theme on load
+initTheme();
+document.addEventListener('DOMContentLoaded', initTheme);
