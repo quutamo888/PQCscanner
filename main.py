@@ -191,7 +191,44 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/index.html", response_class=FileResponse)
 @app.get("/api", response_class=FileResponse)
 @app.get("/api/index", response_class=FileResponse)
+@app.get("/api/index.py", response_class=FileResponse)
 async def serve_index():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+@app.post("/{full_path:path}")
+async def catch_all_post(full_path: str, request: Request):
+    path_check = (full_path + " " + request.headers.get("x-matched-path", "")).lower()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    if "scan-stream" in path_check or "urls" in body:
+        req_obj = BatchScanRequest(**body)
+        return await scan_batch_stream(req_obj)
+    elif "discover-subdomains" in path_check or "domain" in body:
+        req_obj = DiscoverSubdomainsRequest(**body)
+        return await discover_subdomains_api(req_obj)
+    elif "export-cbom" in path_check or "results" in body:
+        req_obj = CbomExportRequest(**body)
+        return await export_cbom_endpoint(req_obj)
+    elif "scan" in path_check or "url" in body:
+        req_obj = SingleScanRequest(**body)
+        return await scan_single_endpoint(req_obj)
+
+    return {"error": "Endpoint not found", "path": full_path, "headers": dict(request.headers)}
+
+@app.get("/{full_path:path}")
+async def catch_all_get(full_path: str, request: Request):
+    path_check = (full_path + " " + request.headers.get("x-matched-path", "")).lower()
+    if "preset" in path_check:
+        return PRESETS
+    if "debug" in path_check:
+        return {
+            "full_path": full_path,
+            "url_path": request.url.path,
+            "headers": dict(request.headers)
+        }
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 if __name__ == "__main__":
