@@ -103,7 +103,7 @@ async def discover_subdomains(domain: str, check_dns: bool = True, max_results: 
     # Concurrently verify DNS reachability
     active_subdomains: List[str] = []
     if check_dns:
-        sem = asyncio.Semaphore(40)
+        sem = asyncio.Semaphore(15)
 
         async def check_host(host: str):
             async with sem:

@@ -101,7 +101,7 @@ async def scan_batch_stream(req: BatchScanRequest):
     raw_urls = [u.strip() for u in req.urls if u.strip()]
     unique_urls = list(dict.fromkeys(raw_urls))
     timeout = max(1.0, min(req.timeout or 4.0, 15.0))
-    concurrency = max(1, min(req.concurrency or 5, 20))
+    concurrency = max(1, min(req.concurrency or 3, 10))
 
     async def ndjson_generator():
         total = len(unique_urls)
@@ -112,6 +112,7 @@ async def scan_batch_stream(req: BatchScanRequest):
 
         async def worker(url_target: str, idx: int):
             async with sem:
+                await asyncio.sleep(idx * 0.05) # Stagger requests to prevent session / rate limit blocking
                 loop = asyncio.get_event_loop()
                 res = await loop.run_in_executor(None, scan_pqc, url_target, timeout)
                 res["index"] = idx

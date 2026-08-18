@@ -385,6 +385,7 @@ def scan_pqc(target_url: str, timeout: float = 4.0) -> Dict[str, Any]:
             sock.close()
             
         # 2. X.509 Certificate Inspection & TLS verification
+        time.sleep(0.05) # Polite delay between probe and cert handshake to prevent session limit drop
         cert_info = inspect_x509_certificate(host, port, timeout=timeout)
         if "error" not in cert_info:
             result["certificate"]["signature_algo"] = cert_info.get("signature_algorithm", "Unknown")
