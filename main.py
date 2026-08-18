@@ -76,10 +76,12 @@ PRESETS = [
 ]
 
 @app.get("/api/presets")
+@app.get("/presets")
 async def get_presets():
     return PRESETS
 
 @app.post("/api/discover-subdomains")
+@app.post("/discover-subdomains")
 async def discover_subdomains_api(req: DiscoverSubdomainsRequest):
     return await discover_subdomains(
         domain=req.domain,
@@ -88,16 +90,19 @@ async def discover_subdomains_api(req: DiscoverSubdomainsRequest):
     )
 
 @app.post("/api/export-cbom")
+@app.post("/export-cbom")
 async def export_cbom_endpoint(req: CbomExportRequest):
     return generate_cbom(req.results)
 
 @app.post("/api/scan")
+@app.post("/scan")
 async def scan_single_endpoint(req: SingleScanRequest):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, scan_pqc, req.url, req.timeout or 4.0)
     return result
 
 @app.post("/api/scan-stream")
+@app.post("/scan-stream")
 async def scan_batch_stream(req: BatchScanRequest):
     raw_urls = [u.strip() for u in req.urls if u.strip()]
     unique_urls = list(dict.fromkeys(raw_urls))
