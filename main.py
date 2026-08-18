@@ -164,6 +164,9 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", response_class=FileResponse)
+@app.get("/index.html", response_class=FileResponse)
+@app.get("/api", response_class=FileResponse)
+@app.get("/api/index", response_class=FileResponse)
 async def serve_index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
