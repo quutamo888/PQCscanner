@@ -34,6 +34,17 @@ async def fix_vercel_path(request: Request, call_next):
         request.scope["path"] = clean_path
     return await call_next(request)
 
+@app.get("/api/debug")
+@app.get("/debug")
+async def debug_endpoint(request: Request):
+    return {
+        "url_path": request.url.path,
+        "scope_path": request.scope.get("path"),
+        "raw_path": str(request.scope.get("raw_path")),
+        "headers": dict(request.headers),
+        "method": request.method
+    }
+
 class SingleScanRequest(BaseModel):
     url: str
     timeout: Optional[float] = 4.0
