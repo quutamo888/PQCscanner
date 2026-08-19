@@ -381,20 +381,39 @@ def openssl_supports_pqc(executable: str) -> bool:
     return _openssl_version_supports_pqc(get_openssl_version(executable))
 
 
-def build_openssl_command(host: str, port: int, group: str, timeout: float = 4.0) -> list[str]:
-    """Build a TLS 1.3 probe command with one selected supported group."""
-    return [
+def find_openssl_ca_file(executable: str) -> Optional[str]:
+    """Find a CA bundle beside common OpenSSL Windows installations."""
+    executable_path = os.path.abspath(executable)
+    candidates = [
+        os.environ.get("SSL_CERT_FILE"),
+        os.path.join(os.path.dirname(executable_path), "PEM", "cert.pem"),
+        os.path.join(os.path.dirname(executable_path), "..", "ssl", "cert.pem"),
+        os.path.join(os.path.dirname(executable_path), "..", "cert.pem"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+    return None
+
+
+def build_openssl_command(
+    host: str, port: int, group: str, timeout: float = 4.0,
+    ca_file: Optional[str] = None,
+) -> list[str]:
+    """Build a TLS 1.3 probe command with hostname and trust validation."""
+    command = [
         "openssl", "s_client",
         "-connect", f"{host}:{port}",
         "-servername", host,
         "-verify_hostname", host,
-        "-verify_return_error",
         "-tls1_3",
         "-groups", group,
         "-brief",
         "-no_ticket",
-        "-ign_eof",
     ]
+    if ca_file:
+        command.extend(["-CAfile", ca_file])
+    return command
 
 
 def parse_openssl_result(completed: subprocess.CompletedProcess) -> Dict[str, Any]:
@@ -447,7 +466,10 @@ def run_openssl_probe(host: str, port: int, timeout: float = 4.0) -> Dict[str, A
             "engine_version": engine_version,
             "error": "OpenSSL 3.5+ PQC engine unavailable",
         }
-    command = build_openssl_command(host, port, "X25519MLKEM768:X25519:secp256r1", timeout)
+    ca_file = find_openssl_ca_file(executable)
+    command = build_openssl_command(
+        host, port, "X25519MLKEM768:X25519:secp256r1", timeout, ca_file
+    )
     command[0] = executable
     try:
         completed = subprocess.run(
@@ -574,10 +596,14 @@ def scan_pqc(target_url: str, timeout: float = 4.0) -> Dict[str, Any]:
             })
             result["certificate_is_pqc"] = cert_info.get("is_pqc_cert", False)
             result["certificate_trusted"] = cert_info.get("certificate_trusted", False)
+            result["evidence"]["certificate_trusted"] = result["certificate_trusted"]
+            if evidence["handshake_completed"] and result["certificate_trusted"]:
+                result["verification_status"] = "verified"
+                result["evidence"]["verification_status"] = "verified"
 
         result["overall_readiness"] = "ready" if evidence["transport_pqc"] else "not_ready"
-        result["passed"] = evidence["verification_status"] == "verified" and bool(evidence["transport_pqc"])
-        result["grade"] = "A+" if result["passed"] else "B" if evidence["verification_status"] == "verified" else "E"
+        result["passed"] = result["verification_status"] == "verified" and bool(evidence["transport_pqc"])
+        result["grade"] = "A+" if result["passed"] else "B" if result["verification_status"] == "verified" else "E"
         result["status_badge"] = "pqc-ready" if result["passed"] else "classical-13" if evidence["verification_status"] == "verified" else "error"
         result["status_title"] = (
             "ผ่าน (PQC Transport Verified)" if result["passed"]

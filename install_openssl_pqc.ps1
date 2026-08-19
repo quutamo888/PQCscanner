@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 [CmdletBinding()]
 param(
     [switch]$SkipInstall
@@ -22,8 +22,14 @@ function Get-OpenSslVersion {
 
 function Test-OpenSslPqcGroup {
     param([Parameter(Mandatory)][string]$Executable)
-    $output = & $Executable s_client -groups X25519MLKEM768 -connect 127.0.0.1:1 2>&1 | Out-String
-    $unsupported = $output -match 'invalid group|unknown group|cannot be set|SSL_CONF_cmd.*failed'
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $Executable s_client -groups X25519MLKEM768 -connect 127.0.0.1:1 2>&1 | Out-String
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    $unsupported = $output -match 'invalid group|unknown group|cannot be set|SSL_CONF_cmd.*failed|no such group'
     return -not $unsupported
 }
 
