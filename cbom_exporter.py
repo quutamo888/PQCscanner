@@ -34,6 +34,13 @@ def generate_cbom(scan_results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "properties": [
                 {"name": "pqc:status", "value": "PASSED" if passed else "FAILED"},
                 {"name": "pqc:grade", "value": grade},
+                {"name": "pqc:verification_status", "value": item.get("verification_status", "unknown")},
+                {"name": "pqc:engine_version", "value": (item.get("evidence") or {}).get("engine_version", "unknown")},
+                {"name": "pqc:transport_pqc", "value": str(item.get("transport_pqc")).lower()},
+                {"name": "pqc:transport_standard_status", "value": item.get("transport_standard_status", "unknown")},
+                {"name": "pqc:certificate_is_pqc", "value": str(item.get("certificate_is_pqc", cert.get("is_pqc", False))).lower()},
+                {"name": "pqc:certificate_trusted", "value": str(item.get("certificate_trusted", False)).lower()},
+                {"name": "pqc:overall_readiness", "value": item.get("overall_readiness", "unknown")},
                 {"name": "pqc:status_title", "value": item.get("status_title", "")},
                 {"name": "pqc:reason_th", "value": item.get("reason_th", "")},
                 {"name": "pqc:reason_en", "value": item.get("reason_en", "")},
@@ -65,7 +72,7 @@ def generate_cbom(scan_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                         "parameterSetIdentifier": kex.get("group_name"),
                         "executionEnvironment": "tls-handshake",
                         "cryptoFunctions": ["key-encapsulation", "key-agreement"],
-                        "classicalSecurityLevel": 128 if is_pqc_kex else 128,
+                        "classicalSecurityLevel": None if is_pqc_kex else 128,
                         "nistQuantumSecurityLevel": q_level
                     },
                     "oid": kex.get("group_hex", "")
