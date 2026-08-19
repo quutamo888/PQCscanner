@@ -398,15 +398,15 @@ def find_openssl_ca_file(executable: str) -> Optional[str]:
 
 def build_openssl_command(
     host: str, port: int, group: str, timeout: float = 4.0,
-    ca_file: Optional[str] = None,
+    ca_file: Optional[str] = None, tls_version: str = "1.3",
 ) -> list[str]:
-    """Build a TLS 1.3 probe command with hostname and trust validation."""
+    """Build a TLS probe command with hostname and trust validation."""
     command = [
         "openssl", "s_client",
         "-connect", f"{host}:{port}",
         "-servername", host,
         "-verify_hostname", host,
-        "-tls1_3",
+        "-tls1_2" if tls_version == "1.2" else "-tls1_3",
         "-groups", group,
         "-brief",
         "-no_ticket",
@@ -414,6 +414,15 @@ def build_openssl_command(
     if ca_file:
         command.extend(["-CAfile", ca_file])
     return command
+
+
+def build_probe_profiles() -> list[tuple[str, str]]:
+    """Try standardized TLS 1.3 PQC, TLS 1.3 classical, then TLS 1.2."""
+    return [
+        ("1.3", "X25519MLKEM768:X25519:secp256r1"),
+        ("1.3", "X25519:secp256r1"),
+        ("1.2", "X25519:secp256r1"),
+    ]
 
 
 def parse_openssl_result(completed: subprocess.CompletedProcess) -> Dict[str, Any]:
@@ -430,7 +439,7 @@ def parse_openssl_result(completed: subprocess.CompletedProcess) -> Dict[str, An
         completed.returncode == 0
         and handshake_output
         and tls_match is not None
-        and tls_match.group(1) == "1.3"
+        and tls_match.group(1) in {"1.2", "1.3"}
     )
     certificate_trusted = bool(re.search(r"Verification:\s*OK", text, re.I))
     group = group_match.group(1) if group_match else None
@@ -467,27 +476,40 @@ def run_openssl_probe(host: str, port: int, timeout: float = 4.0) -> Dict[str, A
             "error": "OpenSSL 3.5+ PQC engine unavailable",
         }
     ca_file = find_openssl_ca_file(executable)
-    command = build_openssl_command(
-        host, port, "X25519MLKEM768:X25519:secp256r1", timeout, ca_file
-    )
-    command[0] = executable
-    try:
-        completed = subprocess.run(
-            command, input="", capture_output=True, text=True,
-            timeout=max(1.0, timeout + 1.0), check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {
-            "handshake_completed": False,
-            "certificate_trusted": False,
-            "transport_pqc": False,
-            "verification_status": "error",
-            "engine_version": engine_version,
-            "error": str(exc),
-        }
-    evidence = parse_openssl_result(completed)
-    evidence["engine_version"] = engine_version
-    return evidence
+    last_evidence = None
+    for tls_version, groups in build_probe_profiles():
+        command = build_openssl_command(host, port, groups, timeout, ca_file, tls_version)
+        command[0] = executable
+        try:
+            completed = subprocess.run(
+                command, input="", capture_output=True, text=True,
+                timeout=max(1.0, timeout + 1.0), check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            last_evidence = {
+                "handshake_completed": False,
+                "certificate_trusted": False,
+                "transport_pqc": False,
+                "verification_status": "error",
+                "engine_version": engine_version,
+                "error": str(exc),
+            }
+            continue
+        evidence = parse_openssl_result(completed)
+        evidence["engine_version"] = engine_version
+        evidence["offered_groups"] = groups
+        evidence["probe_tls_version"] = tls_version
+        last_evidence = evidence
+        if evidence["handshake_completed"]:
+            return evidence
+    return last_evidence or {
+        "handshake_completed": False,
+        "certificate_trusted": False,
+        "transport_pqc": False,
+        "verification_status": "error",
+        "engine_version": engine_version,
+        "error": "TLS probe failed",
+    }
 
 
 def scan_pqc(target_url: str, timeout: float = 4.0) -> Dict[str, Any]:
@@ -603,28 +625,35 @@ def scan_pqc(target_url: str, timeout: float = 4.0) -> Dict[str, Any]:
 
         result["overall_readiness"] = "ready" if evidence["transport_pqc"] else "not_ready"
         result["passed"] = result["verification_status"] == "verified" and bool(evidence["transport_pqc"])
-        result["grade"] = "A+" if result["passed"] else "B" if result["verification_status"] == "verified" else "E"
-        result["status_badge"] = "pqc-ready" if result["passed"] else "classical-13" if evidence["verification_status"] == "verified" else "error"
+        tls_version = result["tls_info"]["version"]
+        result["grade"] = "A+" if result["passed"] else "C" if result["verification_status"] == "verified" and tls_version == "TLS 1.2" else "B" if result["verification_status"] == "verified" else "E"
+        result["status_badge"] = "pqc-ready" if result["passed"] else "classical-12" if tls_version == "TLS 1.2" and result["verification_status"] == "verified" else "classical-13" if result["verification_status"] == "verified" else "error"
         result["status_title"] = (
             "ผ่าน (PQC Transport Verified)" if result["passed"]
-            else "ยังไม่ผ่าน (Classical / Non-PQC)" if evidence["verification_status"] == "verified"
+            else "ยังไม่ผ่าน (TLS 1.2 ดั้งเดิม)" if tls_version == "TLS 1.2" and result["verification_status"] == "verified"
+            else "ยังไม่ผ่าน (Classical / Non-PQC)" if result["verification_status"] == "verified"
             else "ไม่สามารถยืนยันผลได้"
         )
         result["status_title_en"] = (
             "PASSED (PQC Transport Verified)" if result["passed"]
-            else "NOT PASSED (Classical / Non-PQC)" if evidence["verification_status"] == "verified"
+            else "NOT PASSED (Legacy TLS 1.2)" if tls_version == "TLS 1.2" and result["verification_status"] == "verified"
+            else "NOT PASSED (Classical / Non-PQC)" if result["verification_status"] == "verified"
             else "Verification Failed"
         )
         result["reason_en"] = (
             "Verified TLS 1.3 PQC transport." if result["passed"]
+            else "Verified TLS 1.2 classical transport; PQC is not available."
+            if tls_version == "TLS 1.2" and result["verification_status"] == "verified"
             else "Verified TLS 1.3 without a standardized PQC transport group."
-            if evidence["verification_status"] == "verified"
+            if result["verification_status"] == "verified"
             else evidence.get("error") or "TLS evidence is incomplete."
         )
         result["reason_th"] = (
             "ยืนยัน TLS 1.3 PQC transport แล้ว" if result["passed"]
+            else "ยืนยัน TLS 1.2 แบบ classical แล้ว แต่ยังไม่มี PQC"
+            if tls_version == "TLS 1.2" and result["verification_status"] == "verified"
             else "ยืนยัน TLS 1.3 แล้ว แต่ไม่พบ standardized PQC transport group"
-            if evidence["verification_status"] == "verified"
+            if result["verification_status"] == "verified"
             else evidence.get("error") or "หลักฐาน TLS ไม่ครบถ้วน"
         )
     except Exception as exc:
