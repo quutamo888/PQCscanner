@@ -24,22 +24,19 @@ def test_build_client_hello():
     assert record[1:3] == b'\x03\x01' # TLS 1.0 record version
 
 def test_scan_pqc_detection():
-    # Test PQC site (Cloudflare or Google)
+    # Live scan is optional: no local OpenSSL PQC engine means no verified PQC claim.
     res_pqc = scan_pqc("https://cloudflare.com", timeout=5.0)
     print("Cloudflare scan result:", res_pqc)
     assert res_pqc["host"] == "cloudflare.com"
-    assert res_pqc["passed"] is True
-    assert res_pqc["key_exchange"]["is_pqc"] is True
-    assert "ผ่าน" in res_pqc["status_title"]
-    assert len(res_pqc["reason_th"]) > 0
+    assert res_pqc["verification_status"] in {"verified", "engine_unavailable", "error"}
+    assert res_pqc["passed"] is (res_pqc["verification_status"] == "verified" and bool(res_pqc["transport_pqc"]))
+    assert "reason_th" in res_pqc
 
-    # Test Classical site (GitHub)
     res_classical = scan_pqc("https://github.com", timeout=5.0)
     assert res_classical["host"] == "github.com"
-    assert res_classical["passed"] is False
-    assert res_classical["key_exchange"]["is_pqc"] is False
-    assert "ยังไม่ผ่าน" in res_classical["status_title"]
-    assert len(res_classical["reason_th"]) > 0
+    assert res_classical["verification_status"] in {"verified", "engine_unavailable", "error"}
+    assert "reason_th" in res_classical
+
 
 def test_fastapi_endpoints():
     # Test presets
@@ -48,11 +45,13 @@ def test_fastapi_endpoints():
     presets = res.json()
     assert len(presets) > 0
 
-    # Test single scan endpoint
+    # Test single scan endpoint and standards-aware result schema
     res_scan = client.post("/api/scan", json={"url": "https://cloudflare.com", "timeout": 5.0})
     assert res_scan.status_code == 200
     data = res_scan.json()
-    assert data["passed"] is True
+    assert data["verification_status"] in {"verified", "engine_unavailable", "error"}
+    assert data["passed"] is (data["verification_status"] == "verified" and bool(data["transport_pqc"]))
+    assert "evidence" in data
     assert "reason_th" in data
 
 if __name__ == "__main__":

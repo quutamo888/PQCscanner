@@ -438,8 +438,14 @@ function matchesFilter(item) {
 
 
 function getBadgeHtml(item) {
-    if (item.grade === 'A++') {
-        return `<span class="badge badge-pqc-full"><img src="/static/pqc-logo.svg" alt="PQC" class="badge-pqc-icon">Quantum Proof</span>`;
+    if (item.verification_status === 'engine_unavailable') {
+        return `<span class="badge badge-error">PQC Engine Unavailable</span>`;
+    }
+    if (item.verification_status !== 'verified') {
+        return `<span class="badge badge-error">Unverified</span>`;
+    }
+    if (item.transport_pqc === true && item.key_exchange?.is_pqc === true) {
+        return `<span class="badge badge-pqc-full"><img src="/static/pqc-logo.svg" alt="PQC" class="badge-pqc-icon">PQC Transport Verified</span>`;
     }
     if (item.grade === 'A+' || item.passed) {
         return `<span class="badge badge-pqc-ready"><img src="/static/pqc-logo.svg" alt="PQC" class="badge-pqc-icon">PQC Ready</span>`;
@@ -554,6 +560,22 @@ function openModal(index) {
             <div class="detail-row">
                 <span class="detail-label">เหตุผลภาษาอังกฤษ:</span>
                 <span class="detail-value" style="color:var(--color-ink-muted-48);text-align:left;font-family:var(--font-text);">${item.reason_en}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Verification Status:</span>
+                <span class="detail-value">${item.verification_status || 'unknown'}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">OpenSSL Engine:</span>
+                <span class="detail-value">${item.evidence?.engine_version || 'Unavailable'}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">PQC Transport:</span>
+                <span class="detail-value">${item.transport_pqc === true ? 'Verified' : item.transport_pqc === false ? 'Not detected' : 'Unknown'}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Certificate Trust:</span>
+                <span class="detail-value">${item.certificate_trusted ? 'Trusted' : 'Not verified'}</span>
             </div>
         </div>
 
